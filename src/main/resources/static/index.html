@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CollegeBot</title>
+<style>
+  :root { --bg:#e9edf2; --card:#fff; --text:#222; --bubble:#fff; --chatbg:#f6f8fb; --line:#e0e4ea; --brand:#0b5ed7; }
+  body.dark { --bg:#111; --card:#1c1c1e; --text:#eee; --bubble:#2a2a2e; --chatbg:#161618; --line:#333; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:Arial,sans-serif; background:var(--bg); color:var(--text); display:flex; justify-content:center; }
+  #app { width:100%; max-width:440px; height:100vh; background:var(--card); display:flex; flex-direction:column; }
+  header { background:var(--brand); color:#fff; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; }
+  header small { display:block; font-size:11px; opacity:.85; }
+  header button { background:transparent; border:1px solid #fff; color:#fff; border-radius:6px; padding:4px 8px; margin-left:4px; }
+  nav { display:flex; border-bottom:1px solid var(--line); }
+  nav button { flex:1; padding:10px; border:0; background:var(--card); color:var(--text); border-bottom:3px solid transparent; }
+  nav button.active { border-bottom-color:var(--brand); font-weight:bold; }
+  .page { display:none; flex:1; min-height:0; flex-direction:column; }
+  .page.active { display:flex; }
+  #chat { flex:1; overflow-y:auto; padding:12px; background:var(--chatbg); }
+  .msg { max-width:80%; margin:6px 0; padding:8px 12px; border-radius:14px; font-size:14px; line-height:1.4; width:fit-content; white-space:pre-wrap; word-break:break-word; }
+  .msg small { display:block; font-size:10px; opacity:.6; margin-top:3px; }
+  .user { background:var(--brand); color:#fff; margin-left:auto; border-bottom-right-radius:3px; }
+  .bot { background:var(--bubble); border:1px solid var(--line); border-bottom-left-radius:3px; }
+  #quick { display:flex; gap:6px; overflow-x:auto; padding:8px 10px; border-top:1px solid var(--line); }
+  #quick button { white-space:nowrap; border:1px solid var(--brand); background:transparent; color:var(--brand); border-radius:16px; padding:6px 12px; font-size:13px; }
+  #bar { display:flex; padding:10px; gap:8px; border-top:1px solid var(--line); }
+  #msg { flex:1; padding:10px; border:1px solid var(--line); border-radius:20px; outline:none; background:var(--card); color:var(--text); }
+  #bar button { background:var(--brand); color:#fff; border:0; border-radius:20px; padding:0 18px; }
+  #dash { padding:14px; overflow-y:auto; }
+  .stat { display:flex; gap:8px; margin-bottom:14px; }
+  .stat div { flex:1; background:var(--chatbg); border:1px solid var(--line); border-radius:10px; padding:10px; text-align:center; }
+  .stat b { display:block; font-size:22px; color:var(--brand); }
+  .row { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; }
+  .row .name { width:80px; }
+  .row .bar { height:12px; background:var(--brand); border-radius:6px; }
+  #health { font-size:12px; background:var(--chatbg); border:1px solid var(--line); border-radius:10px; padding:10px; line-height:1.7; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>CollegeBot<small>Spring Boot • Cloud ☁️ • <span id="aiBadge">...</span></small></div>
+    <div>
+      <button onclick="toggleDark()">🌙</button>
+      <button onclick="clearChat()">Clear</button>
+    </div>
+  </header>
+  <nav>
+    <button id="t-chat" class="active" onclick="showTab('chat')">Chat</button>
+    <button id="t-dash" onclick="showTab('dash')">Dashboard</button>
+  </nav>
+
+  <div id="p-chat" class="page active">
+    <div id="chat"></div>
+    <div id="quick"></div>
+    <div id="bar">
+      <input id="msg" placeholder="Type your message..." maxlength="300" onkeydown="if(event.key==='Enter')send()">
+      <button onclick="send()">Send</button>
+    </div>
+  </div>
+
+  <div id="p-dash" class="page">
+    <div id="dash">
+      <div class="stat">
+        <div><b id="s-total">0</b>Messages</div>
+        <div><b id="s-user">0</b>Questions</div>
+        <div><b id="s-sess">0</b>Users</div>
+      </div>
+      <h4>Popular topics</h4>
+      <div id="s-intents"></div>
+      <h4>Cloud server info</h4>
+      <div id="health">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const QUICK = ["Timetable","Exam","Fees","Library","Placement","Hostel","Contact"];
+const chat = document.getElementById("chat");
+
+function makeId() {
+  try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return "s" + Date.now() + Math.random().toString(16).slice(2);
+}
+let sid = localStorage.getItem("sid");
+if (!sid) { sid = makeId(); localStorage.setItem("sid", sid); }
+
+function fmt(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  return d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+}
+
+function addMsg(text, who, time) {
+  const d = document.createElement("div");
+  d.className = "msg " + who;
+  const t = document.createElement("span"); t.textContent = text;
+  d.appendChild(t);
+  if (time) {
+    const s = document.createElement("small"); s.textContent = time;
+    d.appendChild(s);
+  }
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+  return d;
+}
+
+async function send(preset) {
+  const input = document.getElementById("msg");
+  const text = (typeof preset === "string" ? preset : input.value).trim();
+  if (!text) return;
+  addMsg(text, "user", fmt());
+  input.value = "";
+  const typing = addMsg("typing...", "bot", "");
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({sessionId: sid, message: text})
+    });
+    const data = await res.json();
+        typing.remove();
+    addMsg(data.reply || "Something went wrong.", "bot", fmt(data.time));
+  } catch (e) {
+    typing.remove();
+    addMsg("Can't connect to the server 😕 Please try again.", "bot", fmt());
+  }
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch("/api/history?sessionId=" + encodeURIComponent(sid));
+    const list = await res.json();
+    if (list.length) list.forEach(m => addMsg(m.message, m.sender, fmt(m.createdAt)));
+    else addMsg("Hello! 👋 I'm CollegeBot. Ask me anything or tap a button below.", "bot", fmt());
+  } catch (e) {
+    addMsg("Hello! 👋 I'm CollegeBot.", "bot", fmt());
+  }
+}
+
+async function clearChat() {
+  try { await fetch("/api/history?sessionId=" + encodeURIComponent(sid), {method: "DELETE"}); } catch (e) {}
+  chat.innerHTML = "";
+  addMsg("Chat cleared. Ask me anything 🙂", "bot", fmt());
+}
+
+function showTab(name) {
+  for (const n of ["chat", "dash"]) {
+    document.getElementById("p-" + n).classList.toggle("active", n === name);
+    document.getElementById("t-" + n).classList.toggle("active", n === name);
+  }
+  if (name === "dash") loadDash();
+}
+
+async function loadDash() {
+  try {
+    const s = await (await fetch("/api/stats")).json();
+    document.getElementById("s-total").textContent = s.totalMessages;
+    document.getElementById("s-user").textContent = s.userQuestions;
+    document.getElementById("s-sess").textContent = s.sessions;
+    const box = document.getElementById("s-intents");
+    box.innerHTML = "";
+    const max = Math.max(1, ...s.intents.map(i => i.count));
+    s.intents.forEach(i => {
+      const row = document.createElement("div"); row.className = "row";
+      const n = document.createElement("span"); n.className = "name"; n.textContent = i.intent;
+      const b = document.createElement("div"); b.className = "bar"; b.style.width = (i.count / max * 140) + "px";
+      const c = document.createElement("span"); c.textContent = i.count;
+      row.append(n, b, c); box.appendChild(row);
+    });
+    const h = await (await fetch("/api/health")).json();
+    document.getElementById("health").textContent =
+      "Status: " + h.status + " | Host: " + h.host + " | Java: " + h.java + " | AI: " + h.ai + " | AI error: " + h.aiError + " | Server time: " + h.serverTime;
+  } catch (e) {
+    document.getElementById("health").textContent = "Couldn't load data.";
+  }
+}
+
+function toggleDark() {
+  document.body.classList.toggle("dark");
+  localStorage.setItem("dark", document.body.classList.contains("dark") ? "1" : "0");
+}
+if (localStorage.getItem("dark") === "1") document.body.classList.add("dark");
+
+const quick = document.getElementById("quick");
+QUICK.forEach(q => {
+  const b = document.createElement("button");
+  b.textContent = q; b.onclick = () => send(q);
+  quick.appendChild(b);
+});
+loadHistory();
+(async () => {
+  try {
+    const h = await (await fetch("/api/health")).json();
+    document.getElementById("aiBadge").textContent = h.ai.startsWith("ON") ? "🟢 AI ON" : "🔴 AI OFF";
+  } catch (e) { document.getElementById("aiBadge").textContent = "?"; }
+})();
+</script>
+</body>
+</html>
